@@ -5,8 +5,12 @@ from ngStorage.ngProcessor.ScanEdgeProcessor import ScanEdgeProcessor
 
 
 def scanEdge(space, returnCols, allCols):
-    scanEdgeResponseIter = storageClient.scanEdge(space, returnCols, allCols, 100, 0, sys.maxint)
+    scanEdgeResponseIter = storageClient.scanEdge(space, returnCols, allCols, 100, 0, sys.maxsize)
     scanEdgeResponse = scanEdgeResponseIter.next()
+    if scanEdgeResponse is None:
+        print('fuck')
+    else:
+        print('ok')
     process(space, scanEdgeResponse)
     while scanEdgeResponseIter.hasNext():
         scanEdgeResponse = scanEdgeResponseIter.next()
@@ -18,7 +22,7 @@ def scanEdge(space, returnCols, allCols):
 def process(space, scanEdgeResponse):
     result = scanEdgeProcessor.process(space, scanEdgeResponse)
     # Get the corresponding rows by edgeName
-    edgeRows = result.rows['select']
+    edgeRows = result.rows['serve']
     for row in edgeRows:
         print(row.defaultProperties)
         print(row.properties)
@@ -29,11 +33,11 @@ if __name__ == '__main__':
     storageClient = StorageClient(metaClient)
     scanEdgeProcessor = ScanEdgeProcessor(metaClient)
 
-    propNames = []
-    propNames.append('grade')
     returnCols = {}
-    returnCols['select'] = propNames
+    returnCols['serve'] = ['start_year', 'end_year']
+    returnCols['follow'] = ['degree']
     allCols = False
 
     for space in metaClient.getPartsAllocFromCache().keys():
+        print('scaning space %s' % space)
         scanEdge(space, returnCols, allCols)

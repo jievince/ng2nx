@@ -1,9 +1,14 @@
 from storage.StorageService import Client
+from storage.ttypes import EntryId
+from storage.ttypes import PropDef
+from storage.ttypes import PropOwner
+from storage.ttypes import ScanEdgeRequest
+from storage.ttypes import ErrorCode
 from thrift.transport import TTransport
 from thrift.transport import TSocket
-from thrift.protocol import TCompactProtocol
-from thrift.protocol import THeaderProtocol
-
+from thrift.protocol import TBinaryProtocol
+import socket
+import struct
 import random
 
 class Iterator:
@@ -31,26 +36,31 @@ class Iterator:
 
 
 class ScanEdgeResponseIter:
-    def __init__(self, space, leader, scanEdgeRequest, storageClient):
+    def __init__(self, clientDad, space, leader, scanEdgeRequest, storageClient):
+        self.clientDad = clientDad
         self.space = space
         self.leader = leader
-        self.scanEdgeRequest = scanEdgeReqeust
-        self.storgeClient = storageClient
+        self.scanEdgeRequest = scanEdgeRequest
+        self.storageClient = storageClient
         self.cursor = None
         self.haveNext = True
 
     def hasNext(self):
-        return haveNext
+        return self.haveNext
 
     def next(self):
-        scanEdgeRequest.cursor = cursor
-        scanEdgeResponse = storageClient.scanEdge(scanEdgeRequest)
-        cursor = scanEdgeResponse.next_cursor
-        haveNext = scanEdgeResponse.has_next
+        self.scanEdgeRequest.cursor = self.cursor
+        print(self.scanEdgeRequest)
+        scanEdgeResponse = self.storageClient.scanEdge(self.scanEdgeRequest)
+        assert(scanEdgeResponse is not None), 'scanEdgeReponse is none'
+        print('scanEdgeResponse: ', scanEdgeResponse)
+        self.cursor = scanEdgeResponse.next_cursor
+        self.haveNext = scanEdgeResponse.has_next
 
         if not isSuccessfully(scanEdgeResponse):
-            handleResultCodes(scanEdgeResponse.result.failed_codes, space, client, leader)
-            haveNext = False
+            print('scanEdgeResponse is not successfully, failed_codes: ', scanEdgeResponse.result.failed_codes)
+            self.clientDad.handleResultCodes(scanEdgeResponse.result.failed_codes, self.space, self.storageClient, self.leader)
+            self.haveNext = False
             return None
         else:
             return scanEdgeResponse
@@ -59,10 +69,11 @@ class ScanEdgeResponseIter:
 
 
 class ScanSpaceEdgeResponseIter:
-    def __init__(self, space, partIdsIter, returnCols, allCols, limit, startTime, endTime):
+    def __init__(self, clientDad, space, partIdsIter, returnCols, allCols, limit, startTime, endTime):
+        self.clientDad = clientDad
         self.scanEdgeResponseIter = None
         self.space = space
-        self.partidsIter = partIdsIter
+        self.partIdsIter = partIdsIter
         self.returnCols = returnCols
         self.allCols = allCols
         self.limit = limit
@@ -70,156 +81,126 @@ class ScanSpaceEdgeResponseIter:
         self.endTime = endTime
 
     def hasNext(self):
-        return scanEdgeResponseIter.hasNext()
+        return self.partIdsIter.hasNext() or self.scanEdgeResponseIter.hasNext()
 
     def next(self):
-        if scanEdgeResponseIter is None or not scanEdgeResponseIter.hasNext():
-            part = partIdsIter.next() # 判断part is None?
-            leader = getLeader(space, part)
+        if self.scanEdgeResponseIter is None or not self.scanEdgeResponseIter.hasNext():
+            part = self.partIdsIter.next() # 判断part.hasNext()??? is None?
+            print('current part:', part)
+            leader = self.clientDad.getLeader(self.space, part)
             if leader is None:
                 #exception: part not found in space
-                pass
-            spaceId = getSpaceIdFromCache(space)
+                raise Exception('part %s not found in space %s' % (part, self.space))
+            print('leader', leader)
+            spaceId = self.clientDad.metaClient.getSpaceIdFromCache(self.space)
             if spaceId == -1:
                 #exception: space not found
-                pass
-
-            colums = getEdgeReturnCols(space, returnCols)
-            scanEdgeRequest = ScanEdgeRequest(spaceId, part, colums, allCols, limit, startTime, endTime)
-            
-            scanEdgeResponseIter = doScanEdge(space, leader, scanEdgeRequest)
-
-            return scanEdgeResponseIter.next()
+                raise Exception('space %s not found' % self.space)
+            print('spaceId: ', spaceId)
+            print('original returnCols: ', self.returnCols)
+            colums = self.clientDad.getEdgeReturnCols(self.space, self.returnCols)
+            print('colums', colums)
+            scanEdgeRequest = ScanEdgeRequest(spaceId, part, None, colums, self.allCols, self.limit, self.startTime, self.endTime)
+            print('scanEdgeRequest', scanEdgeRequest)
+            self.scanEdgeResponseIter = self.clientDad.doScanEdge(self.space, leader, scanEdgeRequest)
+            assert(self.scanEdgeResponseIter is not None), 'scanEdgeResponseIter is None'
+            return self.scanEdgeResponseIter.next()
 
 
 class StorageClient:
     def __init__(self, metaClient):
         self.metaClient = metaClient
         self.partsAlloc = metaClient.getPartsAllocFromCache()
+        self.storageClients = {}
+        self.leaders = {}
+        self.timeout = 1000
+
+    def connect(self, address):
+        if address not in self.storageClients.keys():
+            client = self.doConnect(address)
+            self.storageClients[address] = client
+            return client
+        else:
+            return self.storageClients[address]
+
+    def disConnect(self, address):
+        self.storageClients.remove(address)
 
     def doConnects(self, addresses):
         for address in addresses:
-            client = doConnect(address)
+            client = self.doConnect(address)
             self.storageClients[address] = client
 
     def doConnect(self, address):
-        tTransport = TSocket(address.host, address.port, timeout)
-        tTransport.open()
-        tProtocol = TCompactProtocol(tTransport)
+        ip = socket.inet_ntoa(struct.pack('I',socket.htonl(address.ip)))
+        port = address.port
+        print('tTransport ip: %s, port: %s' % (ip, port))
+        tTransport = TSocket.TSocket(ip, port)
+        if self.timeout > 0:
+            tTransport.setTimeout(self.timeout)
+            tTransport = TTransport.TBufferedTransport(tTransport)
+            tProtocol = TBinaryProtocol.TBinaryProtocol(tTransport)
+            tTransport.open()
         return Client(tProtocol)
 
-    def put(self, spaceName, key, value):
-        spaceId = metaClient.getSpaceIdFromCache(spaceName)
-        part = keyToPartId(spaceName, key)
-        leader = getLeader(spaceName, part)
-        if leader == None:
-            return False
-
-        parts = {part:[(key, value)]}
-        request = PutReuest(spaceId, parts)
-        
-        return doPut(spaceName, leader, request)
-
-    def doPut(self, spaceName, leader, request):
-        client = connect(leader) # connect exception, return None
-        if client == None:
-            disconnect(leader)
-            return False
-
-        execResponse = client.put(request)
-        if not isSuccessfully(execResponse):
-            handleResultCodes(execResponse.result.failed_codes, space, client, leader)
-        else:
-            return True
-
-    def get(self, space, key):
-        spaceId = metaClient.getSpaceIdFromeCache(spaceName)
-        part = keyToPart(spaceName, key)
-        leader = getLeader(spaceName, part)
-        if leader == None:
-            return False
-        
-        parts = {part:[key]}
-        request = GetRequest(spaceId, parts)
-        result = doGet(spaceName, leader, request) # map<key, value>
-        if result == None or key not in result.keys():
-            return None
-        else:
-            return result[key]
-
-    def doGet(self, space, leader, request):
-        client = connect(leader)
-        if client == None:
-            disconnect(leader)
-            return False
-
-        generalResponse = client.get(request)
-        if not isSuccessfully(generalResponse):
-            handleResultCodes(generalResponse.result.failed_codes, space, client, leader)
-        else:
-            return generalResponse.values
-    
     def scanEdge(self, space, returnCols, allCols, limit, startTime, endTime):
-        partIds = metaClient.getPartsAllocFromCache()[space].keys()
+        partIds = self.metaClient.getPartsAllocFromCache()[space].keys()
+        for part in partIds:
+            print('partId: %s' % part)
         partIdsIter = Iterator(partIds)
-        return ScanSpaceEdge(space, partIdsIter, returnCols, allCols, limit, startTime, endTime)
-
-    def scanSpaceEdge(self, space, partIdsIter, returnCols, allCols, limit, startTime, endTime):
-        return ScanSpaceEdgeResponseIter(space, partIdsIter, returnCols, allCols, limit, startTime, endTime)
+        return ScanSpaceEdgeResponseIter(self, space, partIdsIter, returnCols, allCols, limit, startTime, endTime)
         
     def doScanEdge(self, space, leader, scanEdgeRequest):
-        storageClient = connect(leader)
+        client  = self.connect(leader)
         if client is None:
-            client.disConnect()
+            print('cannot connect to leader:', leader)
+            self.disConnect(leader)
             return None
 
-        return ScanEdgeResponseIter(space, leader, scanEdgeRequest, storageClient)
+        return ScanEdgeResponseIter(self, space, leader, scanEdgeRequest, client)
 
-    def scanVertex(self, space, returnCols ):
-        pass
+    def getEdgeReturnCols(self, space, returnCols):
+        columns = {}
+        for edgeName, propNames in returnCols.items():
+            edgeItem = self.metaClient.getEdgeItemFromCache(space, edgeName)
+            if edgeItem is None:
+                # exception: edge not found in space
+                raise Exception('edge %s not found in space %s' % (edgeName, space))
+            edgeType = edgeItem.edge_type
+            entryId = EntryId(edge_type=edgeType)
+            propDefs = []
+            for propName in propNames:
+                propDef = PropDef(PropOwner.EDGE)
+                propDefs.append(propDef)
+            columns[edgeType] = propDefs
+        return columns
 
-def getEdgeReturnCols(space, returnCols):
-    columns = {}
-    for edgeName, propNames in returnCols:
-        edgeItem = getEdgeItemFromCache(space, edgeName)
-        if edgeItme is None:
-            # exception: edge not found in space
-            pass
-        edgeType = edgeItem.edge_type
-        entryId = EntryId(edge_type=edgeType)
-        propDefs = []
-        for propName in propNames:
-            propDef = PropDef(PropOwner.EDGE)
-            propDefs.append(propDef)
-        columns[edgeType] = propDefs
+    def getLeader(self, spaceName, part):
+        if spaceName not in self.leaders.keys():
+            self.leaders[spaceName] = {}
     
-    return columns
+        if part in self.leaders[spaceName].keys():
+            return self.leaders[spaceName][part]
+        else:
+            addresses = self.metaClient.getPartsAllocFromCache()[spaceName][part]
+            if addresses is None:
+                return None
+            leader = addresses[random.randint(0, len(addresses)-1)]
+            self.leaders[spaceName][part] = leader
+            return leader
+    def handleResultCodes(self, failedCodes, space, client, leader):
+        for resultCode in failedCodes:
+            if resultCode.code == ErrorCode.E_LEADER_CHANGED:
+                hostAddr = code.leader
+                if hostAddr is not None and hostAddr.ip != 0 and hostAddr.port != 0:
+                    host = socket.inet_ntoa(struct.pack('I',socket.htonl(hostAddr.ip)))
+                    port = hostAddr.port
+                    newLeader = (host, port)
+                    self.updateLeader(space, code.part_id, newLeader)
+                    newClient = self.storageClients[newLeader]
+                    if newClient is not None:
+                        client =  newClient
+                        leader = newLeader
 
-
-def isSuccessfully(execResponse):
-    return execResponse.result.failed_codes.size() == 0
-
-def getLeader(spaceName, part):
-    if spaceName not in leaders.keys():
-        leaders[spaceName] = {}
-    
-    if part in leaders[spaceName].keys():
-        return leaders[spaceName][part]
-    else:
-        addresses = metaClient.getPartsAllocFromCache()[space][part]
-        if addresses is None:
-            return None
-        leader = addresses[random.randint(0, len(addresses)-1)]
-        leaders[space][part] = leader
-        return leader
-
-def connnect(self, address):
-    if address not in storageClients.keys():
-        client = doConnect(address)
-        storageClients[address] = client
-        return client
-    else:
-        return storageClients[address]
-
-def disConnect(self, address):
-    storageClients.remove(address)
+def isSuccessfully(response):
+    return len(response.result.failed_codes) == 0
