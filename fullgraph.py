@@ -5,6 +5,7 @@ from ngStorage.ngProcessor.ScanEdgeProcessor import ScanEdgeProcessor
 from ngStorage.ngProcessor.ScanVertexProcessor import ScanVertexProcessor
 
 import networkx as nx
+import matplotlib.pyplot as plt
 
 def scanEdge(space, returnCols, allCols):
     scanEdgeResponseIter = storageClient.scanEdge(space, returnCols, allCols, 100, 0, sys.maxsize)
@@ -117,7 +118,9 @@ if __name__ == '__main__':
         print('scaning space %s' % spaceToRead)
         scanVertex(spaceToRead, vertexReturnCols, allCols)
         scanEdge(spaceToRead, edgeReturnCols, allCols)
-    print(list(G.nodes))
-    print(list(G.edges))
-    print(list(nx.connected_components(G)))
-
+    print('nodes: ', list(G.nodes))
+    print('edges: ', list(G.edges))
+    print('connected subgraph: ', list(nx.connected_components(G)))
+    nx.draw(G, with_labels=True, font_weight='bold')
+    plt.show()
+    plt.savefig('./test.png')
