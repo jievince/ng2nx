@@ -22,7 +22,7 @@ class Property:
         return self.propertyDef.name
     
     def getValue(self):
-        return self.valiue 
+        return self.value 
 
 class Row:
     def __init__(self, defaultProperties, properties):

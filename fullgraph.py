@@ -4,6 +4,8 @@ from ngStorage.StorageClient import StorageClient
 from ngStorage.ngProcessor.ScanEdgeProcessor import ScanEdgeProcessor
 from ngStorage.ngProcessor.ScanVertexProcessor import ScanVertexProcessor
 
+import networkx as nx
+
 def scanEdge(space, returnCols, allCols):
     scanEdgeResponseIter = storageClient.scanEdge(space, returnCols, allCols, 100, 0, sys.maxsize)
     scanEdgeResponse = scanEdgeResponseIter.next()
@@ -40,24 +42,43 @@ def processEdge(space, scanEdgeResponse):
     for edgeName, edgeRows in result.rows.items():
         print('edgeName: ', edgeName)
         for row in edgeRows:
-            print('-----------edge------------')
-            for defaultPro in row.defaultProperties:
-                print(defaultPro.value)
-            print('*****************')
-            for pro in row.properties:
-                print(pro.value)
+            srcId = row.defaultProperties[0].getValue()
+            dstId = row.defaultProperties[2].getValue()
+            print('srcId: ', srcId, ' dstId: ', dstId)
+            props = {}
+            for prop in row.properties:
+                propName = prop.getName()
+                propValue = prop.getValue()
+                print('propName: ', propName, 'propValue: ', propValue)
+                props[propName] = propValue
+            G.add_edges_from([(srcId, dstId, props)])
+            #print('-----------edge------------')
+            #for defaultPro in row.defaultProperties:
+            #    print(defaultPro.value)
+            #print('*****************')
+            #for pro in row.properties:
+            #    print(pro.value)
 
 def processVertex(space, scanVertexResponse):
     result = scanVertexProcessor.process(space, scanVertexResponse)
     for tagName, tagRows in result.rows.items():
         print('tagName: ', tagName)
         for row in tagRows:
-            print('-----------vertex------------')
-            for defaultPro in row.defaultProperties:
-                print(defaultPro.value)
-            print('*****************')
-            for pro in row.properties:
-                print(pro.value)
+            vid = row.defaultProperties[0].getValue()
+            print('vid: ', vid)
+            props = {}
+            for prop in row.properties:
+                propName = prop.getName()
+                propValue = prop.getValue()
+                print('propName: ', propName, ' propValue: ', propValue)
+                props[propName] = propValue
+            G.add_nodes_from([(vid, props)])
+            #print('-----------vertex------------')
+            #for defaultPro in row.defaultProperties:
+            #    print(defaultPro.value)
+            #print('*****************')
+            #for pro in row.properties:
+            #    print(pro.value)
 
 
 if __name__ == '__main__':
@@ -74,10 +95,15 @@ if __name__ == '__main__':
     returnCols['book'] = ['name', 'degree', 'likeness', 'own']
     vertexReturnCols = {}
     vertexReturnCols['person'] = ['name', 'age', 'married', 'money']
-    allCols = True
+    allCols = False
     
+    G = nx.Graph()
     for space in metaClient.getPartsAllocFromCache().keys():
         if space == myspace:
             print('scaning space %s' % space)
             scanVertex(space, vertexReturnCols, allCols)
             scanEdge(space, returnCols, allCols)
+    print(list(G.nodes))
+    print(list(G.edges))
+    print(list(nx.connected_components(G)))
+
