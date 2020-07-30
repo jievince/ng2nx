@@ -86,15 +86,10 @@ class RowReader:
         properties.append(Property(PropertyDef.PropertyType.DST_ID, "_dstId", dstId))
         return properties
 
-    def decodeEdgeKey(self, key):  # key是byte[]
+    def vertexKey(self, vertexId, tagId):
         properties = []
-        buffer = wrap(key)
-        
-        properties.append(Property(PropertyDef.PropertyType.SRC_ID, "_srcId", buffer.getLong()))
-        properties.append(Property(PropertyDef.PropertyType.EDGE_TYPE, "_edgeType", buffer.getInt()))
-        properties.append(Property(PropertyDef.PropertyType.EDGE_RANK, "_rank", buffer.getLong()))
-        properties.append(Property(PropertyDef.PropertyType.DST_ID, "_dstId", buffer.getLong()))
-
+        properties.append(Property(PropertyDef.PropertyType.VERTEX_ID, "_vertexId", vertexId))
+        properties.append(Property(PropertyDef.PropertyType.TAG_ID, "_tagId", tagId))
         return properties
 
     def getProperty(self, row, name):
@@ -129,7 +124,7 @@ class RowReader:
 
     def getStringProperty(self, name, value):
         strLen = self.readCompressedInt(value)
-        val = value[self.offset:self.offset+strLen]
+        val = str(value[self.offset:self.offset+strLen], 'utf-8')
         self.offset += strLen
         return Property(PropertyDef.PropertyType.STRING, name, val)
     
@@ -159,5 +154,5 @@ class Result:
     def __init__(self, rows):
         self.rows = rows
         self.size = 0
-        for edgeName in rows.keys():
-            self.size += len(rows[edgeName])
+        for entry in rows:
+            self.size += len(rows[entry])

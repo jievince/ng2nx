@@ -3,6 +3,7 @@ from storage.ttypes import EntryId
 from storage.ttypes import PropDef
 from storage.ttypes import PropOwner
 from storage.ttypes import ScanEdgeRequest
+from storage.ttypes import ScanVertexRequest
 from storage.ttypes import ErrorCode
 from thrift.transport import TTransport
 from thrift.transport import TSocket
@@ -68,6 +69,39 @@ class ScanEdgeResponseIter:
         return None
 
 
+class ScanVertexResponseIter:
+    def __init__(self, clientDad, space, leader, scanVertexRequest, storageClient):
+        self.clientDad = clientDad
+        self.space = space
+        self.leader = leader
+        self.scanVertexRequest = scanVertexRequest
+        self.storageClient = storageClient
+        self.cursor = None
+        self.haveNext = True
+
+    def hasNext(self):
+        return self.haveNext
+
+    def next(self):
+        self.scanVertexRequest.cursor = self.cursor
+        print('scanVertexRequest: ', self.scanVertexRequest)
+        scanVertexResponse = self.storageClient.scanVertex(self.scanVertexRequest)
+        assert(scanVertexResponse is not None), 'scanVertexReponse is none'
+        print('scanVertexResponse: ', scanVertexResponse)
+        self.cursor = scanVertexResponse.next_cursor
+        self.haveNext = scanVertexResponse.has_next
+
+        if not isSuccessfully(scanVertexResponse):
+            print('scanVertexResponse is not successfully, failed_codes: ', scanVertexResponse.result.failed_codes)
+            self.clientDad.handleResultCodes(scanVertexResponse.result.failed_codes, self.space, self.storageClient, self.leader)
+            self.haveNext = False
+            return None
+        else:
+            return scanVertexResponse
+
+        return None
+
+
 class ScanSpaceEdgeResponseIter:
     def __init__(self, clientDad, space, partIdsIter, returnCols, allCols, limit, startTime, endTime):
         self.clientDad = clientDad
@@ -104,6 +138,44 @@ class ScanSpaceEdgeResponseIter:
             assert(self.scanEdgeResponseIter is not None), 'scanEdgeResponseIter is None'
         
         return self.scanEdgeResponseIter.next()
+
+
+class ScanSpaceVertexResponseIter:
+    def __init__(self, clientDad, space, partIdsIter, returnCols, allCols, limit, startTime, endTime):
+        self.clientDad = clientDad
+        self.scanVertexResponseIter = None
+        self.space = space
+        self.partIdsIter = partIdsIter
+        self.returnCols = returnCols
+        self.allCols = allCols
+        self.limit = limit
+        self.startTime = startTime
+        self.endTime = endTime
+
+    def hasNext(self):
+        return self.partIdsIter.hasNext() or self.scanVertexResponseIter.hasNext()
+
+    def next(self):
+        if self.scanVertexResponseIter is None or not self.scanVertexResponseIter.hasNext():
+            part = self.partIdsIter.next() # 判断part.hasNext()??? is None?
+            print('current part:', part)
+            leader = self.clientDad.getLeader(self.space, part)
+            if leader is None:
+                #exception: part not found in space
+                raise Exception('part %s not found in space %s' % (part, self.space))
+            print('leader', leader)
+            spaceId = self.clientDad.metaClient.getSpaceIdFromCache(self.space)
+            if spaceId == -1:
+                #exception: space not found
+                raise Exception('space %s not found' % self.space)
+            print('spaceId: ', spaceId)
+            print('original returnCols: ', self.returnCols)
+            colums = self.clientDad.getVertexReturnCols(self.space, self.returnCols)
+            scanVertexRequest = ScanVertexRequest(spaceId, part, None, colums, self.allCols, self.limit, self.startTime, self.endTime)
+            self.scanVertexResponseIter = self.clientDad.doScanVertex(self.space, leader, scanVertexRequest)
+            assert(self.scanVertexResponseIter is not None), 'scanVertexResponseIter is None'
+
+        return self.scanVertexResponseIter.next()
 
 
 class StorageClient:
@@ -148,7 +220,14 @@ class StorageClient:
             print('partId: %s' % part)
         partIdsIter = Iterator(partIds)
         return ScanSpaceEdgeResponseIter(self, space, partIdsIter, returnCols, allCols, limit, startTime, endTime)
-        
+    
+    def scanVertex(self, space, returnCols, allCols, limit, startTime, endTime):
+        partIds = self.metaClient.getPartsAllocFromCache()[space].keys()
+        for part in partIds:
+            print('partId: %s' % part)
+        partIdsIter = Iterator(partIds)
+        return ScanSpaceVertexResponseIter(self, space, partIdsIter, returnCols, allCols, limit, startTime, endTime)
+
     def doScanEdge(self, space, leader, scanEdgeRequest):
         client  = self.connect(leader)
         if client is None:
@@ -157,6 +236,15 @@ class StorageClient:
             return None
 
         return ScanEdgeResponseIter(self, space, leader, scanEdgeRequest, client)
+    
+    def doScanVertex(self, space, leader, scanVertexRequest):
+        client = self.connect(leader)
+        if client is None:
+            print('cannot connect to leader:', leader)
+            self.disConnect(leader)
+            return None
+
+        return ScanVertexResponseIter(self, space, leader, scanVertexRequest, client)
 
     def getEdgeReturnCols(self, space, returnCols):
         columns = {}
@@ -172,6 +260,21 @@ class StorageClient:
                 propDef = PropDef(PropOwner.EDGE, entryId, propName)
                 propDefs.append(propDef)
             columns[edgeType] = propDefs
+        return columns
+    
+    def getVertexReturnCols(self, space, returnCols):
+        columns = {}
+        for tagName, propNames in returnCols.items():
+            tagItem = self.metaClient.getTagItemFromCache(space, tagName)
+            if tagItem is None:
+                raise Exception('tag %s not found in space %s' % (tagName, space))
+            tagId = tagItem.tag_id
+            entryId = EntryId(tag_id=tagId)
+            propDefs = []
+            for propName in propNames:
+                propDef = PropDef(PropOwner.SOURCE, entryId, propName)
+                propDefs.append(propDef)
+            columns[tagId] = propDefs
         return columns
 
     def getLeader(self, spaceName, part):
