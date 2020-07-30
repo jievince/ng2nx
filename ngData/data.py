@@ -1,4 +1,5 @@
 from enum import Enum
+import struct
 
 class PropertyDef:
     PropertyType = Enum('PropertyType', ('UNKNOWN', 'BOOL', 'INT', 'VID', 'FLOAT', 'DOUBLE', \
@@ -35,6 +36,7 @@ class RowReader:
         self.defs = []
         self.propertyNameIndex = {}
         self.propertyTypes = []
+        self.offset = 0
 
         idx = 0
         for columnDef in schema.columns:
@@ -49,20 +51,28 @@ class RowReader:
             if schemaVersion is None:
                 schemaVersion = self.schemaVersion
             properties = []
+            self.offset = 0
+            header = value[0]
+            self.offset += 1
             for i in range(len(self.defs)):
                 field = self.defs[i][0]
                 propertyType = self.defs[i][1]
-                data = value #decodeResult[i] #######????????
+                #data = value #decodeResult[i] #######????????
                 if propertyType == PropertyDef.PropertyType.BOOL:
-                    properties.append(self.getBoolProperty(field, data))
+                    print('$$$$$$$$$$$$$$decodeValue: BOOL', ' offset: ', self.offset)
+                    properties.append(self.getBoolProperty(field, value))
                 elif propertyType == PropertyDef.PropertyType.INT or propertyType == PropertyDef.PropertyType.VID:
-                    properties.append(self.getIntProperty(field, data))
+                    print('$$$$$$$$$$$$$decodeValue: INT or VID', ' offset: ', self.offset)
+                    properties.append(self.getIntProperty(field, value))
                 elif propertyType == PropertyDef.PropertyType.FLOAT:
-                    properties.append(self.getFloatProperty(field, data))
+                    print('$$$$$$$$$$$decodeValue: FLOAT', 'offset: ', self.offset)
+                    properties.append(self.getFloatProperty(field, value))
                 elif propertyType == PropertyDef.PropertyType.DOUBLE:
-                    properties.append(self.getDoubleProperty(field, data))
+                    print('$$$$$$$$$$decodeValue: DOUBLE', 'offset: ', self.offset)
+                    properties.append(self.getDoubleProperty(field, value))
                 elif propertyType == PropertyDef.PropertyType.STRING:
-                    properties.append(self.getStringProperty(field, data))
+                    print('$$$$$$$$$$decodeValue: STRING', 'offset: ', self.offset)
+                    properties.append(self.getStringProperty(field, value))
                 else:
                     # exception: "Invalid type in schema: type"
                     raise Exception('Invalid propertyType in schema: ', propertyType)
@@ -97,21 +107,52 @@ class RowReader:
             return None
         return row.properties[index]
 
-    def getBoolProperty(self, name, data):
-        value = data[0] != 0x00 
-        return Property(PropertyDef.PropertyType.BOOL, name, value)
+    def getBoolProperty(self, name, value):
+        val = value[self.offset] != 0x00
+        self.offset += 1
+        return Property(PropertyDef.PropertyType.BOOL, name, val)
 
-    def getIntProperty(self, name, data):
-        return Property(PropertyDef.PropertyType.INT, name, data)  #### 字节流解析出data
+    def getIntProperty(self, name, value):
+        val = self.readCompressedInt(value)
+        print('parsing int: ', val)
+        return Property(PropertyDef.PropertyType.INT, name, val)  #### 字节流解析出data
 
-    def getFloatProperty(self, name, data):
-        return Property(PropertyDef.PropertyType.FLOAT, name, data)
+    def getFloatProperty(self, name, value):
+        val = 0.0
+        self.offset += 4
+        return Property(PropertyDef.PropertyType.FLOAT, name, val)
 
-    def getDoubleProperty(self, name, data):
-        return Property(PropertyDef.PropertyType.DOUBLE, name, data)
+    def getDoubleProperty(self, name, value):
+        val = struct.unpack_from('<d', value, self.offset)[0]
+        self.offset += 8
+        return Property(PropertyDef.PropertyType.DOUBLE, name, val)
 
-    def getStringProperty(self, name, data):
-        return Property(PropertyDef.PropertyType.STRING, name, data)
+    def getStringProperty(self, name, value):
+        strLen = self.readCompressedInt(value)
+        val = value[self.offset:self.offset+strLen]
+        self.offset += strLen
+        return Property(PropertyDef.PropertyType.STRING, name, val)
+    
+    def readCompressedInt(self, value):
+        shift = 0
+        val = 0
+        curOff = self.offset
+        byteV = 0
+        while curOff < len(value):
+            byteV = struct.unpack_from('b', value, curOff)[0]
+            print('curByte: ', value[curOff], 'byteV: ', byteV)
+            if byteV >= 0:
+                break
+            val |= (byteV & 0x7f) << shift
+            curOff += 1
+            shift += 7
+        if curOff == len(value):
+            return None
+        val |= byteV << shift
+        curOff += 1
+        print('readCompressedInt: ', value[self.offset:curOff], 'val is: ', val)
+        self.offset = curOff
+        return val
 
 
 class Result:

@@ -25,8 +25,12 @@ def process(space, scanEdgeResponse):
     for edgeName, edgeRows in result.rows.items():
         print('edgeName: ', edgeName)
         for row in edgeRows:
-            print(row.defaultProperties)
-            print(row.properties)
+            print('-----------------------')
+            for defaultPro in row.defaultProperties:
+                print(defaultPro.value)
+            print('******')
+            for pro in row.properties:
+                print(pro.value)
 
 if __name__ == '__main__':
     metaClient = MetaClient([(sys.argv[1], sys.argv[2])])
