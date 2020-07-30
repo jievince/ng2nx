@@ -22,10 +22,11 @@ def scanEdge(space, returnCols, allCols):
 def process(space, scanEdgeResponse):
     result = scanEdgeProcessor.process(space, scanEdgeResponse)
     # Get the corresponding rows by edgeName
-    edgeRows = result.rows['serve']
-    for row in edgeRows:
-        print(row.defaultProperties)
-        print(row.properties)
+    for edgeName, edgeRows in result.rows.items():
+        print('edgeName: ', edgeName)
+        for row in edgeRows:
+            print(row.defaultProperties)
+            print(row.properties)
 
 if __name__ == '__main__':
     metaClient = MetaClient([(sys.argv[1], sys.argv[2])])
@@ -33,11 +34,14 @@ if __name__ == '__main__':
     storageClient = StorageClient(metaClient)
     scanEdgeProcessor = ScanEdgeProcessor(metaClient)
 
+    myspace = 'my'
     returnCols = {}
-    returnCols['serve'] = ['start_year', 'end_year']
-    returnCols['follow'] = ['degree']
-    allCols = False
+    #returnCols['serve'] =  ['start_year', 'end_year']
+    #returnCols['follow'] = ['degree']
+    returnCols['book'] = ['name', 'degree', 'likeness', 'own']
+    allCols = True
 
     for space in metaClient.getPartsAllocFromCache().keys():
-        print('scaning space %s' % space)
-        scanEdge(space, returnCols, allCols)
+        if space == myspace:
+            print('scaning space %s' % space)
+            scanEdge(space, returnCols, allCols)

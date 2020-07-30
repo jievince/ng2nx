@@ -50,7 +50,7 @@ class ScanEdgeResponseIter:
 
     def next(self):
         self.scanEdgeRequest.cursor = self.cursor
-        print(self.scanEdgeRequest)
+        print('scanEdgeRequest: ', self.scanEdgeRequest)
         scanEdgeResponse = self.storageClient.scanEdge(self.scanEdgeRequest)
         assert(scanEdgeResponse is not None), 'scanEdgeReponse is none'
         print('scanEdgeResponse: ', scanEdgeResponse)
@@ -99,12 +99,11 @@ class ScanSpaceEdgeResponseIter:
             print('spaceId: ', spaceId)
             print('original returnCols: ', self.returnCols)
             colums = self.clientDad.getEdgeReturnCols(self.space, self.returnCols)
-            print('colums', colums)
             scanEdgeRequest = ScanEdgeRequest(spaceId, part, None, colums, self.allCols, self.limit, self.startTime, self.endTime)
-            print('scanEdgeRequest', scanEdgeRequest)
             self.scanEdgeResponseIter = self.clientDad.doScanEdge(self.space, leader, scanEdgeRequest)
             assert(self.scanEdgeResponseIter is not None), 'scanEdgeResponseIter is None'
-            return self.scanEdgeResponseIter.next()
+        
+        return self.scanEdgeResponseIter.next()
 
 
 class StorageClient:
@@ -134,7 +133,7 @@ class StorageClient:
     def doConnect(self, address):
         ip = socket.inet_ntoa(struct.pack('I',socket.htonl(address.ip)))
         port = address.port
-        print('tTransport ip: %s, port: %s' % (ip, port))
+        print('StorageClient is connect to: tTransport ip: %s, port: %s' % (ip, port))
         tTransport = TSocket.TSocket(ip, port)
         if self.timeout > 0:
             tTransport.setTimeout(self.timeout)
@@ -170,7 +169,7 @@ class StorageClient:
             entryId = EntryId(edge_type=edgeType)
             propDefs = []
             for propName in propNames:
-                propDef = PropDef(PropOwner.EDGE)
+                propDef = PropDef(PropOwner.EDGE, entryId, propName)
                 propDefs.append(propDef)
             columns[edgeType] = propDefs
         return columns

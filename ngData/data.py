@@ -15,33 +15,17 @@ class Property:
         self.value = value
     
     def getPropertyType(self):
-        return propertyDef.type
+        return self.propertyDef.type
     
     def getName(self):
-        return propertyDef.name
+        return self.propertyDef.name
     
     def getValue(self):
-        propertyType = propertyDef.type
-        if propertyType == BOOL: # python 类型转换
-            return bool(value)
-        elif propertyType == INT or propertyType == VID or propertyType == VERTEX_ID \
-                or propertyType == SRC_ID or propertyType == DST_ID or propertyType == EDGE_RANK:
-            return long(value)
-        elif propertyType == TAG_ID or propertyType == EDGE_TYPE:
-            return int(value)
-        elif propertyType == FLOAT:
-            return float(value)
-        elif propertyType == DOUBLE:
-            return double(value)
-        elif propertyType == STRING:
-            return string(value)
-        else:
-            return None
-        
+        return self.valiue 
 
 class Row:
     def __init__(self, defaultProperties, properties):
-        self.defaultproperties = defaultProperties
+        self.defaultProperties = defaultProperties
         self.properties = properties
 
 
@@ -54,91 +38,80 @@ class RowReader:
 
         idx = 0
         for columnDef in schema.columns:
-            propertyType = PropertyType.getEnum(columnDef.type.type) # ColumnDef is in common/ttypes.py
+            propertyType = PropertyDef.PropertyType(columnDef.type.type+1) # ColumnDef is in common/ttypes.py
+            print('propertyType: ', propertyType)
             columnName = columnDef.name
-            if propertyType == BOOL:
-                defs.append((name, BOOL)) # 需要convert to class???
-            elif propertyType == INT or columnName == VID:
-                defs.append((name, LONG))
-            elif propertyType == FLOAT:
-                defs.append((name, FLOAT))
-            elif propertyType == DOUBLE:
-                defs.append((name, DOUBLE))
-            elif propertyType == STRING:
-                defs.append((name, STRING))
-            else:
-                # exception: "Invalid type in schema: type"
-                pass
-
-            propertyTypes.append(propertyType)
-            propertyNameIndex[columnName] = idx
+            self.defs.append((columnName, propertyType))
+            self.propertyNameIndex[columnName] = idx
             idx = idx + 1
 
-    def docodeValue(self, value, schemaVersion):
-            properties = [Property() for _ in range(len(defs))] #
-            for i in len(defs):
-                field = defs[i].getField()
-                propertyType = propertyTypes[i]
-                data = decodeResult[i]
-                if propertyTypes[i] == BOOL:
-                    properties[i] = getBoolProperty(field, data)
-                elif propertyTypes[i] == INT or propertyTypes[i] == VID:
-                    properties[i] = getIntProperty(field, data)
-                elif propertyTypes[i] == FLOAT:
-                    properties[i] = getFloatProperty(field, data)
-                elif propertyTypes[i] == DOUBLE:
-                    properties[i] = getDoubleProperty(field, data)
-                elif propertyTypes[i] == STRING:
-                    properties[i] = getStringProperty(field, data)
+    def decodeValue(self, value, schemaVersion=None):
+            if schemaVersion is None:
+                schemaVersion = self.schemaVersion
+            properties = []
+            for i in range(len(self.defs)):
+                field = self.defs[i][0]
+                propertyType = self.defs[i][1]
+                data = value #decodeResult[i] #######????????
+                if propertyType == PropertyDef.PropertyType.BOOL:
+                    properties.append(self.getBoolProperty(field, data))
+                elif propertyType == PropertyDef.PropertyType.INT or propertyType == PropertyDef.PropertyType.VID:
+                    properties.append(self.getIntProperty(field, data))
+                elif propertyType == PropertyDef.PropertyType.FLOAT:
+                    properties.append(self.getFloatProperty(field, data))
+                elif propertyType == PropertyDef.PropertyType.DOUBLE:
+                    properties.append(self.getDoubleProperty(field, data))
+                elif propertyType == PropertyDef.PropertyType.STRING:
+                    properties.append(self.getStringProperty(field, data))
                 else:
                     # exception: "Invalid type in schema: type"
-                    pass
+                    raise Exception('Invalid propertyType in schema: ', propertyType)
 
             return properties
 
     def edgeKey(self, srcId, edgeType, dstId):
         properties = []
-        properties.append(Property(PropertyType.SRC_ID, "_srcId", srcId))
-        properties.append(Property(PropertyType.EDGE_TYPE, "_edgeType", edgeType))
-        properties.append(Property(PropertyType.DST_ID, "_dstId", dstId))
+        properties.append(Property(PropertyDef.PropertyType.SRC_ID, "_srcId", srcId))
+        properties.append(Property(PropertyDef.PropertyType.EDGE_TYPE, "_edgeType", edgeType))
+        properties.append(Property(PropertyDef.PropertyType.DST_ID, "_dstId", dstId))
         return properties
 
     def decodeEdgeKey(self, key):  # key是byte[]
         properties = []
         buffer = wrap(key)
         
-        properties.append(Property(PropertyType.SRC_ID, "_srcId", buffer.getLong()))
-        properties.append(Property(PropertyType.EDGE_TYPE, "_edgeType", buffer.getInt()))
-        properties.append(Property(PropertyType.EDGE_RANK, "_rank", buffer.getLong()))
-        properties.append(Property(PropertyType.DST_ID, "_dstId", buffer.getLong()))
+        properties.append(Property(PropertyDef.PropertyType.SRC_ID, "_srcId", buffer.getLong()))
+        properties.append(Property(PropertyDef.PropertyType.EDGE_TYPE, "_edgeType", buffer.getInt()))
+        properties.append(Property(PropertyDef.PropertyType.EDGE_RANK, "_rank", buffer.getLong()))
+        properties.append(Property(PropertyDef.PropertyType.DST_ID, "_dstId", buffer.getLong()))
 
         return properties
 
     def getProperty(self, row, name):
         if name not in propertyNameIndex.keys():
             return None
-        return row.getProperties()[propertyNameIndex[name]]
+        return row.properties[propertyNameIndex[name]]
 
     def getPropertyByIndex(self, row, index):
         if index < 0 or index >= len(row.getProperties()):
             return None
-        return row.getProperties()[index]
+        return row.properties[index]
 
     def getBoolProperty(self, name, data):
         value = data[0] != 0x00 
-        return Property(PropertyType.BOOL, name, value)
+        return Property(PropertyDef.PropertyType.BOOL, name, value)
 
     def getIntProperty(self, name, data):
-        return Property(PropertyType.INT, name, buffer.getLong())
+        return Property(PropertyDef.PropertyType.INT, name, data)  #### 字节流解析出data
 
     def getFloatProperty(self, name, data):
-        return Property(PropertyType.FLOAT, name, buffer.getFloat())
+        return Property(PropertyDef.PropertyType.FLOAT, name, data)
 
     def getDoubleProperty(self, name, data):
-        return Property(PropertyType.DOUBLE, name, buffer.getDouble())
+        return Property(PropertyDef.PropertyType.DOUBLE, name, data)
 
     def getStringProperty(self, name, data):
-        return Property(PropertyType.STRING, name, String(buffer.array()))
+        return Property(PropertyDef.PropertyType.STRING, name, data)
 
 
 class Result:
