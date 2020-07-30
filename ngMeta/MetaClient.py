@@ -186,7 +186,7 @@ class MetaClient:
         getTagResp = self.metaClient.getTag(getTagReq)
         result = {}
         for columnDef in getTagResp.schema.columns:
-            result[columDef.name] = columnDef.type.type # 需要将type convert to Class
+            result[columnDef.name] = columnDef.type.type # 需要将type convert to Class
 
         return result
 
@@ -238,6 +238,7 @@ class MetaClient:
         spaceId = self.spaceNameMap[spaceName]
         getEdgeReq = GetEdgeReq(spaceId, edgeName, version)
         getEdgeResp = self.metaClient.getEdge(getEdgeReq)
+        result = {}
         for columnDef in getEdgeResp.schema.columns:
             result[columnDef.name] = columnDef.type.type # 需要converte it to Class
 

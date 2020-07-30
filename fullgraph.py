@@ -80,6 +80,20 @@ def processVertex(space, scanVertexResponse):
             #for pro in row.properties:
             #    print(pro.value)
 
+def getReturnCols(space):
+    tagItems = metaClient.getTags(space)
+    vertexReturnCols = {}
+    for tagItem in tagItems:
+        tagName = tagItem.tag_name
+        vertexReturnCols[tagName] = metaClient.getTagSchema(space, tagName).keys()
+    edgeItems = metaClient.getEdges(space)
+    edgeReturnCols = {}
+    for edgeItem in edgeItems:
+        edgeName = edgeItem.edge_name
+        edgeReturnCols[edgeName] = metaClient.getEdgeSchema(space, edgeName).keys()
+
+    return vertexReturnCols, edgeReturnCols
+
 
 if __name__ == '__main__':
     metaClient = MetaClient([(sys.argv[1], sys.argv[2])])
@@ -88,21 +102,21 @@ if __name__ == '__main__':
     scanEdgeProcessor = ScanEdgeProcessor(metaClient)
     scanVertexProcessor = ScanVertexProcessor(metaClient)
 
-    myspace = 'my'
-    returnCols = {}
+    spaceToRead = sys.argv[3]
     #returnCols['serve'] =  ['start_year', 'end_year']
     #returnCols['follow'] = ['degree']
-    returnCols['book'] = ['name', 'degree', 'likeness', 'own']
-    vertexReturnCols = {}
-    vertexReturnCols['person'] = ['name', 'age', 'married', 'money']
-    allCols = False
+    #returnCols['book'] = ['name', 'degree', 'likeness', 'own']
+    vertexReturnCols, edgeReturnCols = getReturnCols(spaceToRead)
+    #vertexReturnCols['person'] = ['name', 'age', 'married', 'money']
+    allCols = True
     
     G = nx.Graph()
-    for space in metaClient.getPartsAllocFromCache().keys():
-        if space == myspace:
-            print('scaning space %s' % space)
-            scanVertex(space, vertexReturnCols, allCols)
-            scanEdge(space, returnCols, allCols)
+    if spaceToRead not in metaClient.getPartsAllocFromCache().keys():
+        raise Exception('spaceToRead %s is not found in nebula')
+    else:
+        print('scaning space %s' % spaceToRead)
+        scanVertex(spaceToRead, vertexReturnCols, allCols)
+        scanEdge(spaceToRead, edgeReturnCols, allCols)
     print(list(G.nodes))
     print(list(G.edges))
     print(list(nx.connected_components(G)))
