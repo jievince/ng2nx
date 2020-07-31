@@ -18,6 +18,8 @@ from thrift.transport import TTransport
 from thrift.transport import TSocket
 from thrift.protocol import TBinaryProtocol
 import random
+import socket
+import struct
 
 class MetaClient:
     def __init__(self, addresses, timeout=1000,
@@ -45,15 +47,14 @@ class MetaClient:
     def doConnect(self, addresses):
         address = addresses[random.randint(0, len(addresses)-1)]
         print(address[0], address[1])
-        ip = address[0]
+        host = address[0]
         port = address[1]
-        tTransport = TSocket.TSocket(ip, port)
-        if self.timeout > 0:
-            tTransport.setTimeout(self.timeout)
-            tTransport = TTransport.TBufferedTransport(tTransport)
-            tProtocol = TBinaryProtocol.TBinaryProtocol(tTransport)
-            tTransport.open()
-            self.metaClient = Client(tProtocol)
+        tTransport = TSocket.TSocket(host, port)
+        tTransport.setTimeout(self.timeout)
+        tTransport = TTransport.TBufferedTransport(tTransport)
+        tProtocol = TBinaryProtocol.TBinaryProtocol(tTransport)
+        tTransport.open()
+        self.metaClient = Client(tProtocol)
 
         for spaceIdName in self.listSpaces():
             spaceName = spaceIdName.name # class IdName
@@ -95,14 +96,12 @@ class MetaClient:
         if listSpacesResp.code == ErrorCode.SUCCEEDED:
             return listSpacesResp.spaces########## spaceNameID--> IdName
         else:
-            # LOGGER.error("List Spaces Error Code: code")
+            print('list spaces error, error code: ', listSpacesResp.code)
             return None
 
     def getPartFromCache(self, spaceName, part):
         if spaceName not in self.spacePartLocation.keys():
-            # 多线程时加锁
-            self.spacePartLocation[spaceName] = self.getPartsAlloc(spaceName)
-
+            return None
         partsAlloc = self.spacePartLocation[spaceName]
         if partsAlloc is None or part not in partsAlloc.keys():
             return None
@@ -110,19 +109,24 @@ class MetaClient:
 
     def getPartsAlloc(self, spaceName):
         spaceId = self.getSpaceIdFromCache(spaceName)
-        # 检查 spaceId == -1 ???
+        if spaceId == -1:
+            return None
         getPartsAllocReq = GetPartsAllocReq(spaceId)
         getPartsAllocResp = self.metaClient.getPartsAlloc(getPartsAllocReq)
 
         if getPartsAllocResp.code == ErrorCode.SUCCEEDED:
             addressMap = {}
-            for partId, addresses in getPartsAllocResp.parts.items():
-                # host ip, 转换
+            for partId, hostAddrs in getPartsAllocResp.parts.items():
+                addresses = []
+                for hostAddr in hostAddrs:
+                    host = socket.inet_ntoa(struct.pack('I',socket.htonl(hostAddr.ip)))
+                    port = hostAddr.port
+                    addresses.append((host, port))
                 addressMap[partId] = addresses
 
             return addressMap
         else:
-            # LOGGER.error("Get Parts Error: code")
+            print("get parts alloc error, error code: ", getPartsAllocResp.code)
             return None
 
     def getPartsAllocFromCache(self):
@@ -131,21 +135,20 @@ class MetaClient:
     def getPartAllocFromCache(self, spaceName, part):
         if spaceName in self.spacePartLocation.keys():
             partsAlloc = self.spacePartLocation[spaceName]
-            if part in partsAlloc:
+            if part in partsAlloc.keys():
                 return partsAlloc[part]
         
         return None
     
     def getTagItemFromCache(self, spaceName, tagName):
         if spaceName not in self.spaceTagItems.keys():
-            # 加锁
             tags = {}
             for tagItem in self.getTags(spaceName):
                 tags[tagItem.tag_name] = tagItem
             self.spaceTagItems[spaceName] = tags
 
         tagItems = self.spaceTagItems[spaceName]
-        if tagName in tagItems.keys(): # better way??? if tagName in tagItems.keys(): 
+        if tagName in tagItems.keys(): 
             return tagItems[tagName]
         return None
 
@@ -159,15 +162,15 @@ class MetaClient:
 
     def getTags(self, spaceName):
         spaceId = self.getSpaceIdFromCache(spaceName)
-        # 需要检查spaceId吧？
-        # if spaceId == -1 return None
+        if spaceId == -1:
+            return None
         listTagsReq = ListTagsReq(spaceId)
         listTagsResp = self.metaClient.listTags(listTagsReq)
         
         if listTagsResp.code == ErrorCode.SUCCEEDED:
             return listTagsResp.tags
         else:
-            # LOGGER.error("Get Tags Error: code")
+            print('get tags error, error code: ', listTagsResp.code)
             return None
 
     def getTag(self, spaceName, tagName):
@@ -193,7 +196,6 @@ class MetaClient:
 
     def getEdgeItemFromCache(self, spaceName, edgeName):
         if spaceName not in self.spaceEdgeItems.keys():
-            # 加锁
             edges = {}
             for edgeItem in self.getEdges(spaceName):
                 edges[edgeItem.edge_name] = edgeItem
@@ -215,31 +217,36 @@ class MetaClient:
 
     def getEdges(self, spaceName):
         spaceId = self.getSpaceIdFromCache(spaceName)
+        if spaceId == -1:
+            return None
         listEdgesReq = ListEdgesReq(spaceId)
         listEdgesResp =self.metaClient.listEdges(listEdgesReq)
         if listEdgesResp.code == ErrorCode.SUCCEEDED:
             return listEdgesResp.edges
         else:
-            # LOGGER.error("Get Tags Error: code")
+            print('get tags error, error code: ', listEdgesResp.code)
             return None
 
     def getEdge(self, spaceName, edgeName):
         spaceId = self.getSpaceIdFromCache(spaceName)
+        if spaceId == -1:
+            return None
         getEdgeReq = GetEdgeReq(spaceId, edgeName, -1)
         getEdgeResp = self.metaClient.getEdge(getEdgeReq)
         if getEdgeResp.code == ErrorCode.SUCCEEDED:
             return getEdgeResp.Schema
         else:
+            print('get edge error, error code: ', getEdgeResp.code)
             return None
 
     def getEdgeSchema(self, spaceName, edgeName, version=-1):
-        if spaceName not in self.spaceNameMap.keys():
+        spaceId = self.getSpaceIdFromCache(spaceName)
+        if spaceId == -1:
             return None
-        spaceId = self.spaceNameMap[spaceName]
         getEdgeReq = GetEdgeReq(spaceId, edgeName, version)
         getEdgeResp = self.metaClient.getEdge(getEdgeReq)
         result = {}
         for columnDef in getEdgeResp.schema.columns:
-            result[columnDef.name] = columnDef.type.type # 需要converte it to Class
+            result[columnDef.name] = columnDef.type.type
 
         return result
