@@ -62,6 +62,9 @@ def processEdge(space, scanEdgeResponse):
 
 def processVertex(space, scanVertexResponse):
     result = scanVertexProcessor.process(space, scanVertexResponse)
+    if result is None:
+        print('processVertex: result is None')
+        return None
     for tagName, tagRows in result.rows.items():
         print('tagName: ', tagName)
         for row in tagRows:

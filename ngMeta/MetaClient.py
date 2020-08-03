@@ -7,6 +7,8 @@ from meta.ttypes import GetPartsAllocReq
 from meta.ttypes import GetPartsAllocResp
 from meta.ttypes import GetTagReq
 from meta.ttypes import GetTagResp
+from meta.ttypes import ListHostsReq
+from meta.ttypes import ListHostsResp
 from meta.ttypes import ListEdgesReq
 from meta.ttypes import ListEdgesResp
 from meta.ttypes import ListSpacesReq
@@ -30,6 +32,7 @@ class MetaClient:
         self.executionRetry = executionRetry
         self.spaceNameMap = {} # map<spaceName, spaceId>
         self.spacePartLocation = {} # map<spaceName, map<partId, list<address>>>
+        self.spacePartLeader = {} # map<spaceName, map<partId, leader'saddress>>
         self.spaceTagItems = {} # map<spaceName, map<TagItem.tag_name, TagItem>>
         self.spaceEdgeItems = {} # map<spaceName, map<edgeItem.edge_name, edgeItem>
         self.tagNameMap = {} # map<spaceName, map<TagItem.tag_id, TagItem.tag_name>
@@ -46,7 +49,7 @@ class MetaClient:
 
     def doConnect(self, addresses):
         address = addresses[random.randint(0, len(addresses)-1)]
-        print(address[0], address[1])
+        print('metaClient is connecting to: ', address[0], address[1])
         host = address[0]
         port = address[1]
         tTransport = TSocket.TSocket(host, port)
@@ -61,7 +64,7 @@ class MetaClient:
             self.spaceNameMap[spaceName] = spaceIdName.id.get_space_id()
             print(spaceName, spaceIdName.id.get_space_id())
             self.spacePartLocation[spaceName] = self.getPartsAlloc(spaceName)
-
+            self.spacePartLeader[spaceName] = {}
             # Loading tag schema's cache
             tags = {}
             tagsName = {}
@@ -80,6 +83,8 @@ class MetaClient:
                 edgesName[edgeItem.edge_type] = edgeItem.edge_name
             self.spaceEdgeItems[spaceName] = edges
             self.edgeNameMap[spaceName] = edgesName
+        # Get part leader
+        self.getSpacePartLeader()
 
         return 0
 
@@ -88,11 +93,32 @@ class MetaClient:
             return -1
         else:
             return self.spaceNameMap[spaceName]
-    
+    def getSpacePartLeaderFromCache(self, spaceName, partId):
+        if spaceName not in self.spacePartLeader.keys():
+            return None
+        if partId not in self.spacePartLeader[spaceName].keys():
+            return None
+        return self.spacePartLeader[spaceName][partId]
+
+    def getSpacePartLeader(self):
+        listHostsReq = ListHostsReq()
+        listHostsResp = self.metaClient.listHosts(listHostsReq)
+        if listHostsResp.code != ErrorCode.SUCCEEDED:
+            print('getSpacePartLeader error, eror code: ', listHostsResp.code)
+            return None
+
+        for hostItem in listHostsResp.hosts:
+            host = socket.inet_ntoa(struct.pack('I',socket.htonl(hostItem.hostAddr.ip & 0xffffffff))) 
+            port = hostItem.hostAddr.port
+            leader = (host, port)
+            for space, partIds in hostItem.leader_parts.items():
+                for partId in partIds:
+                    self.spacePartLeader[space][partId] = leader
+        print('getSpacePartLeader: ', self.spacePartLeader)
+
     def listSpaces(self):
         listSpacesReq = ListSpacesReq()
         listSpacesResp = self.metaClient.listSpaces(listSpacesReq)
-
         if listSpacesResp.code == ErrorCode.SUCCEEDED:
             return listSpacesResp.spaces########## spaceNameID--> IdName
         else:
@@ -115,12 +141,15 @@ class MetaClient:
         getPartsAllocResp = self.metaClient.getPartsAlloc(getPartsAllocReq)
 
         if getPartsAllocResp.code == ErrorCode.SUCCEEDED:
+            print('getPartsAllocResp.leader: ', getPartsAllocResp.leader)
+            print('partId, hostAddrs: ', getPartsAllocResp.parts)
             addressMap = {}
             for partId, hostAddrs in getPartsAllocResp.parts.items():
                 addresses = []
                 for hostAddr in hostAddrs:
-                    host = socket.inet_ntoa(struct.pack('I',socket.htonl(hostAddr.ip)))
+                    host = socket.inet_ntoa(struct.pack('I',socket.htonl(hostAddr.ip & 0xffffffff)))
                     port = hostAddr.port
+                    print('host: ', host, ' fdfdPort: ', port)
                     addresses.append((host, port))
                 addressMap[partId] = addresses
 

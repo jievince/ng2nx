@@ -293,23 +293,13 @@ class StorageClient:
         return columns
 
     def getLeader(self, spaceName, part):
-        if spaceName not in self.leaders.keys():
-            self.leaders[spaceName] = {}
-    
-        if part in self.leaders[spaceName].keys():
-            return self.leaders[spaceName][part]
-        else:
-            addresses = self.metaClient.getPartsAllocFromCache()[spaceName][part]
-            if addresses is None:
-                return None
-            leader = addresses[random.randint(0, len(addresses)-1)] # 有问题， 应该获取的是真正的leader
-            self.leaders[spaceName][part] = leader
-            return leader
+        return self.metaClient.getSpacePartLeaderFromCache(spaceName, part)
 
     def handleResultCodes(self, failedCodes, space, client, leader):
         for resultCode in failedCodes:
             if resultCode.code == ErrorCode.E_LEADER_CHANGED:
-                hostAddr = code.leader
+                print('ErrorCode.E_LEADER_CHANGED, leader changed to :', resultCode.leader)
+                hostAddr = resultCode.leader
                 if hostAddr is not None and hostAddr.ip != 0 and hostAddr.port != 0:
                     host = socket.inet_ntoa(struct.pack('I',socket.htonl(hostAddr.ip)))
                     port = hostAddr.port

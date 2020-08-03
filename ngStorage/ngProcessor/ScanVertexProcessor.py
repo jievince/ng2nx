@@ -9,10 +9,12 @@ class ScanVertexProcessor:
         self.metaClient = metaClient
 
     def process(self, spaceName, scanVertexResponse):
+        if scanVertexResponse is None:
+            print('process: scanVertexResponse is None')
+            return None
         rowReaders = {}
         rows = {}
         tagIdNameMap = {}
-
         if scanVertexResponse.vertex_schema is not None:
             print('start to process vertex_schema')
             for tagId, schema in scanVertexResponse.vertex_schema.items():
